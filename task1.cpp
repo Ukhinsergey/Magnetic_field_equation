@@ -117,27 +117,26 @@ struct Field
         }
     }
 
-    void deriv_func(int dimension) {
+    void deriv_func(fftw_complex *vec, int dimension) {
         double coef;
-        for(int q = 0 ; q < 3; ++q) {
-            for(ptrdiff_t i = 0; i < local_n0; ++i) {
-                for(ptrdiff_t j = 0 ; j < N; ++j) {
-                    for(ptrdiff_t k = 0 ; k < indr; ++k) {
-                        std::swap(  vec_c[q][(i * N + j) * (N / 2 + 1) + k][0],
-                                    vec_c[q][(i * N + j) * (N / 2 + 1) + k][1]);
-                        if (dimension == 0) {
-                            coef = inds[local_0_start + i];
-                        } else if (dimension == 1) {
-                            coef = inds[j];
-                        } else {
-                            coef = k;
-                        }
-                        vec_c[q][(i * N + j) * (N / 2 + 1) + k][0] *= -coef;
-                        vec_c[q][(i * N + j) * (N / 2 + 1) + k][1] *=  coef;
+        for(ptrdiff_t i = 0; i < local_n0; ++i) {
+            for(ptrdiff_t j = 0 ; j < N; ++j) {
+                for(ptrdiff_t k = 0 ; k < indr; ++k) {
+                    std::swap(  vec[(i * N + j) * (N / 2 + 1) + k][0],
+                                vec[(i * N + j) * (N / 2 + 1) + k][1]);
+                    if (dimension == 0) {
+                        coef = inds[local_0_start + i];
+                    } else if (dimension == 1) {
+                        coef = inds[j];
+                    } else {
+                        coef = k;
                     }
+                    vec[(i * N + j) * (N / 2 + 1) + k][0] *= -coef;
+                    vec[(i * N + j) * (N / 2 + 1) + k][1] *=  coef;
                 }
             }
         }
+    
         return;
 }
 };
@@ -178,7 +177,9 @@ void test_deriv(Field &field) {
     for(int n = 0 ; n < 3; ++n) {
         field.fill_func();
         field.forward_transform();
-        field.deriv_func(n);
+        field.deriv_func(field.vec_c[0], n);
+        field.deriv_func(field.vec_c[1], n);
+        field.deriv_func(field.vec_c[2], n);
         field.backward_transform();
 
         double max_diff = 0.;
@@ -213,6 +214,80 @@ void test_deriv(Field &field) {
     return;
 }
 
+void test_divergence(Field& field) {
+    const ptrdiff_t N = field.N;
+
+    std::vector<std::vector<std::function<double(const double, const double, const double)>>> real_deriv_func(3); // i - func num, j - var num
+    real_deriv_func[0].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * std::cos(1 * x1 - 2 * x2 + 3 * x3);
+    });
+    real_deriv_func[0].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * -2 * std::cos(1 * x1 - 2 * x2 + 3 * x3);
+    });
+    real_deriv_func[0].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 3 * std::cos(1 * x1 - 2 * x2 + 3 * x3);
+    });
+    real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+    });
+    real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
+        return 0;
+    });
+    real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+    });
+    real_deriv_func[2].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(-3 * x1 - x2 + x3)) * -3 * std::cos(-3 * x1 - x2 + x3);
+    });
+    real_deriv_func[2].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(-3 * x1 - x2 + x3)) * -std::cos(-3 * x1 - x2 + x3);
+    });
+    real_deriv_func[2].push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(-3 * x1 - x2 + x3)) * std::cos(-3 * x1 - x2 + x3);
+    });
+
+    field.fill_func();
+    field.forward_transform();
+
+    field.deriv_func(field.vec_c[0], 0);
+    field.deriv_func(field.vec_c[1], 1);
+    field.deriv_func(field.vec_c[2], 2);
+
+    field.backward_transform();
+
+
+    double max_diff = 0.;
+    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t k = 0; k < N; ++k) {
+                const double cur_x = 2 * M_PI * (field.local_0_start + i) / N;
+                const double cur_y = 2 * M_PI * j / N;
+                const double cur_z = 2 * M_PI * k / N;
+                max_diff = std::max(max_diff, std::abs(
+                    field.vec_r[0][(i * N + j) * (2 * (N / 2 + 1)) + k] +
+                    field.vec_r[1][(i * N + j) * (2 * (N / 2 + 1)) + k] +
+                    field.vec_r[2][(i * N + j) * (2 * (N / 2 + 1)) + k] -
+                    (real_deriv_func[0][0](cur_x, cur_y, cur_z) +
+                     real_deriv_func[1][1](cur_x, cur_y, cur_z) +
+                     real_deriv_func[2][2](cur_x, cur_y, cur_z))));
+            }
+        }
+    }
+
+    if (field.rank == 0) {
+        MPI_Reduce(MPI_IN_PLACE, &max_diff, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    } else {
+        MPI_Reduce(&max_diff, nullptr, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    }
+
+    if (field.rank == 0) {
+        std::cout << "max deviation from correct ans(div):" << '\n';
+        std::cout << max_diff << '\n';
+    }
+
+    return;
+}
+
 int main(int argc, char **argv)
 {
     const ptrdiff_t N = std::atoi(argv[1]);
@@ -228,6 +303,7 @@ int main(int argc, char **argv)
     {
         Field field{N, alloc_local, local_n0, local_0_start, rank, size};
         test_deriv(field);
+        test_divergence(field);
      //   MPI_Barrier(MPI_COMM_WORLD);
     }
     MPI_Finalize();
