@@ -396,6 +396,77 @@ void test_rotor(Field& field) {
     return;
 }
 
+double field_energy_phi(const double *ptr_1,
+                        const double *ptr_2,
+                        const double *ptr_3,
+                        Field& field) {
+    double energy = 0.;
+    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+        for (ptrdiff_t j = 0; j < field.N; ++j) {
+            for (ptrdiff_t k = 0; k < field.N; ++k) {
+                const ptrdiff_t idx = (i * field.N + j) * (2 * (field.N / 2 + 1)) + k;
+                energy += ptr_1[idx] * ptr_1[idx] +
+                          ptr_2[idx] * ptr_2[idx] +
+                          ptr_3[idx] * ptr_3[idx];
+            }
+        }
+    }
+    energy /= 2;
+    return energy;
+}
+
+double field_energy_fourie( const fftw_complex *ptr_1,
+                            const fftw_complex *ptr_2,
+                            const fftw_complex *ptr_3,
+                            Field& field) {
+    double energy = 0.;
+    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+        for (ptrdiff_t j = 0; j < field.N; ++j) {
+            ptrdiff_t idx = (i * field.N + j) * (field.N / 2 + 1);
+            energy += 0.5 * (ptr_1[idx][0] * ptr_1[idx][0] + ptr_1[idx][1] * ptr_1[idx][1] +
+                             ptr_2[idx][0] * ptr_2[idx][0] + ptr_2[idx][1] * ptr_2[idx][1] +
+                             ptr_3[idx][0] * ptr_3[idx][0] + ptr_3[idx][1] * ptr_3[idx][1]);
+            for (ptrdiff_t k = 1; k < field.indr; ++k) {
+                ++idx;
+                energy += (ptr_1[idx][0] * ptr_1[idx][0] + ptr_1[idx][1] * ptr_1[idx][1] +
+                           ptr_2[idx][0] * ptr_2[idx][0] + ptr_2[idx][1] * ptr_2[idx][1] +
+                           ptr_3[idx][0] * ptr_3[idx][0] + ptr_3[idx][1] * ptr_3[idx][1]);
+            }
+        }
+    }
+    return energy;
+}
+
+void test_energy(Field& field) {
+    field.fill_func();
+
+    double energy = field_energy_phi(field.vec_r[0], field.vec_r[1], field.vec_r[2], field);
+    if (field.rank == 0) {
+        MPI_Reduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    } else {
+        MPI_Reduce(&energy, nullptr, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    }
+    if (field.rank == 0) {
+        std::cout << "energy real space" << '\n';
+        std::cout << energy << '\n';
+    }
+
+    field.forward_transform();
+
+    energy = field_energy_fourie(field.vec_c[0], field.vec_c[1], field.vec_c[2], field);
+    if (field.rank == 0) {
+        MPI_Reduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    } else {
+        MPI_Reduce(&energy, nullptr, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    }
+    if (field.rank == 0) {
+        std::cout << "energy fourie space" << '\n';
+        std::cout << energy << '\n';
+    }
+
+    return;
+}
+
 
 
 
@@ -417,6 +488,7 @@ int main(int argc, char **argv)
         test_deriv(field);
         test_divergence(field);
         test_rotor(field);
+        test_energy(field);
     }
     MPI_Finalize();
     return 0;
