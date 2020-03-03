@@ -288,6 +288,118 @@ void test_divergence(Field& field) {
     return;
 }
 
+
+void rotor(fftw_complex *rot,
+           const fftw_complex *cross_p_l, const fftw_complex *cross_p_r,
+           Field& field, const int num_of_dimension) {
+    double coef_l, coef_r;
+    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+        for (ptrdiff_t j = 0; j < field.N; ++j) {
+            for (ptrdiff_t k = 0; k < field.indr; ++k) {
+                const ptrdiff_t idx = (i * field.N + j) * (field.N / 2 + 1) + k;
+                if (num_of_dimension == 0) {
+                    coef_l = field.inds[j];
+                    coef_r = k;
+                } else if (num_of_dimension == 1) {
+                    coef_l = k;
+                    coef_r = field.inds[field.local_0_start + i];
+                } else {
+                    coef_l = field.inds[field.local_0_start + i];
+                    coef_r = field.inds[j];
+                }
+                rot[idx][0] = -cross_p_l[idx][1] * coef_l + cross_p_r[idx][1] * coef_r;
+                rot[idx][1] =  cross_p_l[idx][0] * coef_l - cross_p_r[idx][0] * coef_r;
+            }
+        }
+    }
+    return;
+}
+
+
+void test_rotor(Field& field) {
+    const ptrdiff_t N = field.N;
+    
+    field.fill_func();
+
+    std::vector<std::function<double(const double, const double, const double)>> rotor_functions;
+    rotor_functions.push_back([](const double x1, const double x2, const double x3) {
+        return -std::exp(std::sin(-3 * x1 - x2 + x3)) * std::cos(-3 * x1 - x2 + x3) - std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+    });
+    rotor_functions.push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 3 * std::cos(x1 - 2 * x2 + 3 * x3) + std::exp(std::sin(-3 * x1 - x2 + x3)) * 3 * std::cos(-3 * x1 - x2 + x3);
+    });
+    rotor_functions.push_back([](const double x1, const double x2, const double x3) {
+        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3) + std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 2 * std::cos(x1 - 2 * x2 + 3 * x3);
+    });
+
+    fftw_complex *rotor_c[3];
+    double* rotor_r[3];
+    fftw_plan rot_c_to_r[3];
+    for (int q = 0; q < 3; ++q) {
+        rotor_r[q] = fftw_alloc_real(2 * field.alloc_local);
+        rotor_c[q] = fftw_alloc_complex(field.alloc_local);
+        rot_c_to_r[q] = fftw_mpi_plan_dft_c2r_3d(N, N, N, rotor_c[q], rotor_r[q], MPI_COMM_WORLD, FFTW_MEASURE);
+    }
+
+    field.forward_transform();
+
+    rotor(rotor_c[0], field.vec_c[2], field.vec_c[1], field, 0);
+    rotor(rotor_c[1], field.vec_c[0], field.vec_c[2], field, 1);
+    rotor(rotor_c[2], field.vec_c[1], field.vec_c[0], field, 2);
+
+    fftw_execute(rot_c_to_r[0]);
+    fftw_execute(rot_c_to_r[1]);
+    fftw_execute(rot_c_to_r[2]);
+
+    for (int q = 0; q < 3; ++q) {
+        for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < field.N; ++j) {
+                for (ptrdiff_t k = 0; k < field.N; ++k) {
+                    rotor_r[q][(i * N + j) * (2 * (N / 2 + 1)) + k] /= N * std::sqrt(N);
+                }
+            }
+        }
+    }
+
+    double max_diff = 0.;
+    for (int q = 0; q < 3; ++q) {
+        for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < field.N; ++j) {
+                for (ptrdiff_t k = 0; k < field.N; ++k) {
+                    const double cur_x = 2 * M_PI * (field.local_0_start + i) / N;
+                    const double cur_y = 2 * M_PI * j / N;
+                    const double cur_z = 2 * M_PI * k / N;
+                    max_diff = std::max(max_diff, std::abs(rotor_r[q][(i * N + j) * (2 * (N / 2 + 1)) + k] - rotor_functions[q](cur_x, cur_y, cur_z)));
+                }
+            }
+        }
+    }
+
+    if (field.rank == 0) {
+        MPI_Reduce(MPI_IN_PLACE, &max_diff, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    } else {
+        MPI_Reduce(&max_diff, nullptr, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    }
+
+    if (field.rank == 0) {
+        std::cout << "max deviation from correct ans(rot):" << '\n';
+        std::cout << max_diff << '\n';
+    }
+
+
+    for (int q = 0; q < 3; ++q) {
+        fftw_free(rotor_r[q]);
+        fftw_free(rotor_c[q]);
+        fftw_destroy_plan(rot_c_to_r[q]);
+    }
+
+    return;
+}
+
+
+
+
+
 int main(int argc, char **argv)
 {
     const ptrdiff_t N = std::atoi(argv[1]);
@@ -304,7 +416,7 @@ int main(int argc, char **argv)
         Field field{N, alloc_local, local_n0, local_0_start, rank, size};
         test_deriv(field);
         test_divergence(field);
-     //   MPI_Barrier(MPI_COMM_WORLD);
+        test_rotor(field);
     }
     MPI_Finalize();
     return 0;
