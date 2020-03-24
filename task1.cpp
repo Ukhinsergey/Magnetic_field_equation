@@ -62,7 +62,7 @@ struct Field
             return std::exp(std::sin(x1 - 2 * x2 + 3 * x3));
         });
         func.push_back([](const double x1, const double x2, const double x3) {
-            return std::exp(std::cos(-x1 - x3));
+            return std::exp(std::cos(-x1 + x2 + x3));
         });
         func.push_back([](const double x1, const double x2, const double x3) {
             return std::exp(std::sin(-3 * x1 - x2 + x3));
@@ -157,13 +157,13 @@ void test_deriv(Field &field) {
         return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) *  3 * std::cos(1 * x1 - 2 * x2 + 3 * x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 -x3);
+        return std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return 0;
+        return -std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 -x3);
+        return -std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[2].push_back([](const double x1, const double x2, const double x3) {
         return std::exp(std::sin(-3 * x1 - x2 + x3)) * -3 * std::cos(-3 * x1 - x2 + x3);
@@ -228,13 +228,13 @@ void test_divergence(Field& field) {
         return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 3 * std::cos(1 * x1 - 2 * x2 + 3 * x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+        return std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return 0;
+        return -std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[1].push_back([](const double x1, const double x2, const double x3) {
-        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+        return -std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     real_deriv_func[2].push_back([](const double x1, const double x2, const double x3) {
         return std::exp(std::sin(-3 * x1 - x2 + x3)) * -3 * std::cos(-3 * x1 - x2 + x3);
@@ -247,7 +247,12 @@ void test_divergence(Field& field) {
     });
 
     field.fill_func();
+    double starttime, endtime;
+    starttime = MPI_Wtime();
     field.forward_transform();
+    endtime = MPI_Wtime();
+    float restime = endtime - starttime;
+    //std::cout << restime << std::endl;
 
     field.deriv_func(field.vec_c[0], 0);
     field.deriv_func(field.vec_c[1], 1);
@@ -275,12 +280,15 @@ void test_divergence(Field& field) {
     }
 
     if (field.rank == 0) {
+        MPI_Reduce(MPI_IN_PLACE, &restime, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(MPI_IN_PLACE, &max_diff, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     } else {
+        MPI_Reduce(&restime, nullptr, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(&max_diff, nullptr, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     }
 
     if (field.rank == 0) {
+        std::cout << "max time for TTF " << restime << std::endl;
         std::cout << "max deviation from correct ans(div):" << '\n';
         std::cout << max_diff << '\n';
     }
@@ -323,13 +331,13 @@ void test_rotor(Field& field) {
 
     std::vector<std::function<double(const double, const double, const double)>> rotor_functions;
     rotor_functions.push_back([](const double x1, const double x2, const double x3) {
-        return -std::exp(std::sin(-3 * x1 - x2 + x3)) * std::cos(-3 * x1 - x2 + x3) - std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3);
+        return -std::exp(std::sin(-3 * x1 - x2 + x3)) * std::cos(-3 * x1 - x2 + x3) + std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3);
     });
     rotor_functions.push_back([](const double x1, const double x2, const double x3) {
         return std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 3 * std::cos(x1 - 2 * x2 + 3 * x3) + std::exp(std::sin(-3 * x1 - x2 + x3)) * 3 * std::cos(-3 * x1 - x2 + x3);
     });
     rotor_functions.push_back([](const double x1, const double x2, const double x3) {
-        return std::exp(std::cos(-x1 - x3)) * std::sin(-x1 - x3) + std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 2 * std::cos(x1 - 2 * x2 + 3 * x3);
+        return std::exp(std::cos(-x1 + x2 + x3)) * std::sin(-x1 + x2 + x3) + std::exp(std::sin(x1 - 2 * x2 + 3 * x3)) * 2 * std::cos(x1 - 2 * x2 + 3 * x3);
     });
 
     fftw_complex *rotor_c[3];
@@ -412,6 +420,7 @@ double field_energy_phi(const double *ptr_1,
         }
     }
     energy /= 2;
+    energy /=  field.N * field.N * field.N;
     return energy;
 }
 
@@ -434,6 +443,7 @@ double field_energy_fourie( const fftw_complex *ptr_1,
             }
         }
     }
+    energy /=  field.N * field.N * field.N;
     return energy;
 }
 
