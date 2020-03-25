@@ -223,81 +223,113 @@ struct Field
         return;
     }
 
-};
-
-
-
-void rotor(fftw_complex *rot,
-           const fftw_complex *cross_p_l, const fftw_complex *cross_p_r,
-           Field& field, const int num_of_dimension) {
-    double coef_l, coef_r;
-    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
-        for (ptrdiff_t j = 0; j < field.N; ++j) {
-            for (ptrdiff_t k = 0; k < field.indr; ++k) {
-                const ptrdiff_t idx = (i * field.N + j) * (field.N / 2 + 1) + k;
-                if (num_of_dimension == 0) {
-                    coef_l = field.inds[j];
-                    coef_r = k;
-                } else if (num_of_dimension == 1) {
-                    coef_l = k;
-                    coef_r = field.inds[field.local_0_start + i];
-                } else {
-                    coef_l = field.inds[field.local_0_start + i];
-                    coef_r = field.inds[j];
+    double energy_fourie() {
+        double energy = 0;
+        for (ptrdiff_t i = 0; i < local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                ptrdiff_t idx = (i * N + j) * (N / 2 + 1);
+                energy += 0.5 * (vec_c[0][idx][0] * vec_c[0][idx][0] + vec_c[0][idx][1] * vec_c[0][idx][1] +
+                                 vec_c[1][idx][0] * vec_c[1][idx][0] + vec_c[1][idx][1] * vec_c[1][idx][1] +
+                                 vec_c[2][idx][0] * vec_c[2][idx][0] + vec_c[2][idx][1] * vec_c[2][idx][1]);
+                for (ptrdiff_t k = 1; k < indr; ++k) {
+                    ++idx;
+                    energy += (vec_c[0][idx][0] * vec_c[0][idx][0] + vec_c[0][idx][1] * vec_c[0][idx][1] +
+                               vec_c[1][idx][0] * vec_c[1][idx][0] + vec_c[1][idx][1] * vec_c[1][idx][1] +
+                               vec_c[2][idx][0] * vec_c[2][idx][0] + vec_c[2][idx][1] * vec_c[2][idx][1]);
                 }
-                rot[idx][0] = -cross_p_l[idx][1] * coef_l + cross_p_r[idx][1] * coef_r;
-                rot[idx][1] =  cross_p_l[idx][0] * coef_l - cross_p_r[idx][0] * coef_r;
             }
         }
+
+        MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+        return energy;
+
     }
-    return;
-}
 
+    void cross_product(Field &velocity, Field &magnetic) {
+        ptrdiff_t idx;
+        for (ptrdiff_t i = 0; i < local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t k = 0; k < N; ++k) {
+                    idx = (i * N + j) * (2 * (N / 2 + 1)) + k;
+                    vec_r[0][idx] = velocity.vec_r[1][idx] * magnetic.vec_r[2][idx] -
+                                    velocity.vec_r[2][idx] * magnetic.vec_r[1][idx];
 
+                    vec_r[1][idx] = velocity.vec_r[2][idx] * magnetic.vec_r[0][idx] -
+                                    velocity.vec_r[0][idx] * magnetic.vec_r[2][idx];
 
-
-double field_energy_phi(const double *ptr_1,
-                        const double *ptr_2,
-                        const double *ptr_3,
-                        Field& field) {
-    double energy = 0.;
-    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
-        for (ptrdiff_t j = 0; j < field.N; ++j) {
-            for (ptrdiff_t k = 0; k < field.N; ++k) {
-                const ptrdiff_t idx = (i * field.N + j) * (2 * (field.N / 2 + 1)) + k;
-                energy += ptr_1[idx] * ptr_1[idx] +
-                          ptr_2[idx] * ptr_2[idx] +
-                          ptr_3[idx] * ptr_3[idx];
+                    vec_r[2][idx] = velocity.vec_r[0][idx] * magnetic.vec_r[1][idx] -
+                                    velocity.vec_r[1][idx] * magnetic.vec_r[0][idx];
+                }
             }
         }
-    }
-    energy /= 2;
-    energy /=  field.N * field.N * field.N;
-    return energy;
-}
 
-double field_energy_fourie( const fftw_complex *ptr_1,
-                            const fftw_complex *ptr_2,
-                            const fftw_complex *ptr_3,
-                            Field& field) {
-    double energy = 0.;
-    for (ptrdiff_t i = 0; i < field.local_n0; ++i) {
-        for (ptrdiff_t j = 0; j < field.N; ++j) {
-            ptrdiff_t idx = (i * field.N + j) * (field.N / 2 + 1);
-            energy += 0.5 * (ptr_1[idx][0] * ptr_1[idx][0] + ptr_1[idx][1] * ptr_1[idx][1] +
-                             ptr_2[idx][0] * ptr_2[idx][0] + ptr_2[idx][1] * ptr_2[idx][1] +
-                             ptr_3[idx][0] * ptr_3[idx][0] + ptr_3[idx][1] * ptr_3[idx][1]);
-            for (ptrdiff_t k = 1; k < field.indr; ++k) {
-                ++idx;
-                energy += (ptr_1[idx][0] * ptr_1[idx][0] + ptr_1[idx][1] * ptr_1[idx][1] +
-                           ptr_2[idx][0] * ptr_2[idx][0] + ptr_2[idx][1] * ptr_2[idx][1] +
-                           ptr_3[idx][0] * ptr_3[idx][0] + ptr_3[idx][1] * ptr_3[idx][1]);
+        return;
+        
+    }
+
+    void rotor(Field &velocity, Field &magnetic) {
+        cross_product(velocity, magnetic);
+
+        forward_transform();
+        double coef_0_l, coef_0_r, coef_1_l, coef_1_r, coef_2_l, coef_2_r;
+        double tmp_0_r, tmp_0_i, tmp_1_r, tmp_1_i, tmp_2_r, tmp_2_i;
+        ptrdiff_t idx;
+        for (ptrdiff_t i = 0; i < local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t k = 0; k < indr; ++k) {
+                    idx = (i * N + j) * (N / 2 + 1) + k;
+                    coef_0_l = inds[j];
+                    coef_0_r = k;
+                    coef_1_l = k;
+                    coef_1_r = inds[local_0_start + i];
+                    coef_2_l = inds[local_0_start + i];
+                    coef_2_r = inds[j];
+                    tmp_0_r = vec_c[0][idx][0];
+                    tmp_0_i = vec_c[0][idx][1];
+                    tmp_1_r = vec_c[1][idx][0];
+                    tmp_1_i = vec_c[1][idx][1];
+                    tmp_2_r = vec_c[2][idx][0];
+                    tmp_2_i = vec_c[2][idx][1];
+                    vec_c[0][idx][0] = -tmp_2_i * coef_0_l + tmp_1_i * coef_0_r;
+                    vec_c[0][idx][1] =  tmp_2_r * coef_0_l - tmp_1_r * coef_0_r;
+                    vec_c[1][idx][0] = -tmp_0_i * coef_1_l + tmp_2_i * coef_1_r;
+                    vec_c[1][idx][1] =  tmp_0_r * coef_1_l - tmp_2_r * coef_1_r;
+                    vec_c[2][idx][0] = -tmp_1_i * coef_2_l + tmp_0_i * coef_2_r;
+                    vec_c[2][idx][1] =  tmp_1_r * coef_2_l - tmp_0_r * coef_2_r;
+                }
             }
         }
+
+        return;
     }
-    energy /=  field.N * field.N * field.N;
-    return energy;
-}
+
+    void step(Field &velocity, Field &rotor) {
+        rotor.rotor(velocity, *this);
+        ptrdiff_t idx;
+        double coef_0, coef_1, coef_2, sum_coef;
+        for (ptrdiff_t i = 0; i < local_n0; ++i) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t k = 0; k < indr; ++k) {
+                    idx = (i * N + j) * (N / 2 + 1) + k;
+                    coef_0 = inds[local_0_start + i];
+                    coef_1 = inds[j];
+                    coef_2 = k;
+                    sum_coef = coef_0 * coef_0 + coef_1 * coef_1 + coef_2 * coef_2;
+                    vec_c[0][idx][0] += (-ETA * sum_coef * vec_c[0][idx][0] + rotor.vec_c[0][idx][0]) * TAU;
+                    vec_c[0][idx][1] += (-ETA * sum_coef * vec_c[0][idx][1] + rotor.vec_c[0][idx][1]) * TAU;
+                    vec_c[1][idx][0] += (-ETA * sum_coef * vec_c[1][idx][0] + rotor.vec_c[1][idx][0]) * TAU;
+                    vec_c[1][idx][1] += (-ETA * sum_coef * vec_c[1][idx][1] + rotor.vec_c[1][idx][1]) * TAU;
+                    vec_c[2][idx][0] += (-ETA * sum_coef * vec_c[2][idx][0] + rotor.vec_c[2][idx][0]) * TAU;
+                    vec_c[2][idx][1] += (-ETA * sum_coef * vec_c[2][idx][1] + rotor.vec_c[2][idx][1]) * TAU;
+                }
+            }
+        }
+
+        return;
+    }
+
+};
 
 
 int main(int argc, char **argv)
@@ -318,12 +350,16 @@ int main(int argc, char **argv)
         Field magnetic{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         Field velocity{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         Field tmp{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
+        Field rotor{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         velocity.fill_velocity_field();
         magnetic.fill_velocity_field();
         double energy;
         magnetic.forward_transform();
         for(int i = 0; i < iters; ++i) {
             magnetic.correction(tmp);
+            magnetic.backward_transform();
+            magnetic.step(velocity, rotor);
+            energy = magnetic.energy_fourie();
             if (rank == 0) {
                 fout << energy << "\n";
             }
