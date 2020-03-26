@@ -90,7 +90,7 @@ struct Field
             return std::sin(x1 - 2 * x2 + 3 * x3);
         });
         func.push_back([](const double x1, const double x2, const double x3) {
-            return std::cos(-x1 - x3 + 5 * x2);
+            return std::cos(x3 + 5 * x2);
         });
         func.push_back([](const double x1, const double x2, const double x3) {
             return std::sin(-3 * x1 - x2 + x3);
@@ -242,7 +242,7 @@ struct Field
 
         MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
-        return energy;
+        return energy/N/N/N;
 
     }
 
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
         Field tmp{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         Field rotor{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         velocity.fill_velocity_field();
-        magnetic.fill_velocity_field();
+        magnetic.fill_magnetic_field();
         double energy;
         magnetic.forward_transform();
         for(int i = 0; i < iters; ++i) {
@@ -360,6 +360,9 @@ int main(int argc, char **argv)
             magnetic.backward_transform();
             magnetic.step(velocity, rotor);
             energy = magnetic.energy_fourie();
+            if (energy > 1e250) {
+                break;
+            }
             if (rank == 0) {
                 fout << energy << "\n";
             }
