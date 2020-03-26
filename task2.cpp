@@ -4,7 +4,8 @@
 #include <vector>
 #include <cmath>
 #include <fstream>
-
+#include <chrono>
+#include <string>
 
 const double EPSILON = 1e-8;
 
@@ -338,6 +339,7 @@ int main(int argc, char **argv)
     const ptrdiff_t N = std::atoi(argv[2]);
     const double tau = std::strtod(argv[3], nullptr);
     const double eta = std::strtod(argv[4], nullptr);
+    std::string filename = argv[5];
     int rank, size;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -345,7 +347,7 @@ int main(int argc, char **argv)
     fftw_mpi_init();
     ptrdiff_t alloc_local, local_n0, local_0_start;
     alloc_local = fftw_mpi_local_size_3d(N, N, N/2 + 1, MPI_COMM_WORLD, &local_n0, &local_0_start);
-    std::ofstream fout("file_energy.data");
+    std::ofstream fout(filename);
     {
         Field magnetic{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         Field velocity{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
@@ -355,6 +357,7 @@ int main(int argc, char **argv)
         magnetic.fill_magnetic_field();
         double energy;
         magnetic.forward_transform();
+        const auto begin = std::chrono::steady_clock::now();
         for(int i = 0; i < iters; ++i) {
             magnetic.correction(tmp);
             magnetic.backward_transform();
@@ -366,6 +369,11 @@ int main(int argc, char **argv)
             if (rank == 0) {
                 fout << energy << "\n";
             }
+        }
+        const auto end = std::chrono::steady_clock::now();
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
+        if (rank == 0) {
+            fout << elapsed_ms.count() << "ms" << "\n";
         }
     }
     fout.close();

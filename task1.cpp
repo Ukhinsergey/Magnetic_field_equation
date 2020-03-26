@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include <cmath>
+#include <iostream>
 
 
 const double EPSILON = 1e-8;

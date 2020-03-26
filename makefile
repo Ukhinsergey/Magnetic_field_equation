@@ -15,11 +15,27 @@ task2.o:task2.cpp
 	mpic++ -o task2.o $(FLAGS1) -c task2.cpp $(FFTW_FLAGS)
 
 
+report: task2
+	#mpisubmit.pl -w 00:30 -p 1 ./task2 -- 1000 128 0.0001 1 proc1.data
+	#mpisubmit.pl -w 00:30 -p 2 ./task2 -- 1000 128 0.0001 1 proc2.data
+	#mpisubmit.pl -w 00:30 -p 4 ./task2 -- 1000 128 0.0001 1 proc4.data
+	#mpisubmit.pl -w 00:30 -p 8 ./task2 -- 1000 128 0.0001 1 proc8.data
+	#mpisubmit.pl -w 00:30 -p 16 ./task2 -- 1000 128 0.0001 1 proc16.data
+	#mpisubmit.pl -w 00:30 -p 32 ./task2 -- 1000 128 0.0001 1 proc32.data
+	#mpisubmit.pl -w 00:30 -p 60 ./task2 -- 1000 128 0.0001 1 proc60.data
+	#mpisubmit.pl -w 00:30 -p 1 ./task2 -- 1000 96 0.0001 1 proc1.data
+	#mpisubmit.pl -w 00:30 -p 2 ./task2 -- 1000 96 0.0001 1 proc2.data
+	#mpisubmit.pl -w 00:30 -p 4 ./task2 -- 1000 96 0.0001 1 proc4.data
+	mpisubmit.pl -w 00:30 -p 8 ./task2 -- 1000 96 0.0001 1 proc8.data
+	mpisubmit.pl -w 00:30 -p 16 ./task2 -- 1000 96 0.0001 1 proc16.data
+	mpisubmit.pl -w 00:30 -p 32 ./task2 -- 1000 96 0.0001 1 proc32.data
+	#mpisubmit.pl -w 00:30 -p 60 ./task2 -- 1000 96 0.0001 1 proc60.data
 
 submit:task2
-	mpisubmit.pl -w 00:30 -p 60 ./task2 -- 300000 128 0.001 0.1
-	#mpisubmit.pl -w 00:30 -p 60 ./task2 -- 300000 128 0.0001 0.1
-	#bsub -n 32 -W 01:05 -q normal -eo err -oo out ./task2 300000 128 0.0001 0.1
+	#mpisubmit.pl -w 00:30 -p 60 ./task2 -- 300000 128 0.001 0.1 file_energy.data
+	mpisubmit.pl -w 00:30 -p 60 ./task2 -- 300000 128 0.0001 1 file_energy.data
+	#mpisubmit.pl -w 00:30 -p 60 ./task2 -- 300000 128 0.0001 0.1 file_energy.data
+	#bsub -n 32 -W 01:05 -q normal -eo err -oo out ./task2 300000 128 0.0001 0.1 file_energy.data
 
 clean:
 	rm -f *.o task1 task2 *.data
