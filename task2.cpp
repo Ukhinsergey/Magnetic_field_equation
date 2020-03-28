@@ -348,6 +348,7 @@ int main(int argc, char **argv)
     ptrdiff_t alloc_local, local_n0, local_0_start;
     alloc_local = fftw_mpi_local_size_3d(N, N, N/2 + 1, MPI_COMM_WORLD, &local_n0, &local_0_start);
     std::ofstream fout(filename);
+    std::vector<double> energy;
     {
         Field magnetic{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         Field velocity{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
@@ -355,25 +356,25 @@ int main(int argc, char **argv)
         Field rotor{N, alloc_local, local_n0, local_0_start, rank, size, tau, eta};
         velocity.fill_velocity_field();
         magnetic.fill_magnetic_field();
-        double energy;
         magnetic.forward_transform();
+        MPI_Barrier(MPI_COMM_WORLD);
         const auto begin = std::chrono::steady_clock::now();
         for(int i = 0; i < iters; ++i) {
             magnetic.correction(tmp);
             magnetic.backward_transform();
             magnetic.step(velocity, rotor);
-            energy = magnetic.energy_fourie();
-            if (energy > 1e250) {
-                break;
-            }
-            if (rank == 0) {
-                fout << energy << "\n";
-            }
+            energy.push_back(magnetic.energy_fourie());
         }
+        MPI_Barrier(MPI_COMM_WORLD);
         const auto end = std::chrono::steady_clock::now();
         auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
         if (rank == 0) {
             fout << elapsed_ms.count() << "ms" << "\n";
+        }
+        if(rank == 0) {
+            for(const auto& i:energy) {
+                fout << i << "\n";
+            }
         }
     }
     fout.close();
